@@ -29,6 +29,37 @@ continues to save button assignments for all games and includes Reset to default
 This package installs one **Xbox** system entry
 and reads games from the existing **`Roms/XBOX`** folder. 
 
+## muOS Compatibility Fix – TrimUI Smart Pro
+
+This fork includes a fix for an analog stick Y-axis inversion issue affecting the hakuX Xbox port on the TrimUI Smart Pro running muOS.
+
+### The issue
+
+When playing *Silent Hill 2: Restless Dreams*, pushing the left analog stick fully forward could make the character move backward instead. Partial forward input worked normally.
+
+### The fix
+
+The original axis inversion could overflow when SDL returned the minimum signed 16-bit value (`-32768`).
+
+The axis inversion logic was adjusted to handle this edge case safely, mapping `-32768` to `32767` instead of attempting to negate it.
+
+The fix is applied to both left and right Y-axis inputs.
+
+### Build compatibility
+
+The Zig cross-compilation target was also updated from GLIBC 2.33 to GLIBC 2.38 to support linking against the SDL2 library used on the tested muOS environment.
+
+### Tested on
+
+- Device: TrimUI Smart Pro
+- Firmware: muOS Andromeda 2606
+- Port: hakuX Xbox port
+- Game: Silent Hill 2: Restless Dreams
+
+The corrected build was successfully tested on the device, and the full-forward analog stick input behaved correctly.
+
+This fork preserves the original hakuX project while including these compatibility improvements.
+
 ## Download and install
 
 1. Download [the ready-to-install ZIP](release/xbox-trimui-smart-pro-v0.1.3.zip)
