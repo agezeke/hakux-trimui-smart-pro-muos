@@ -7,4 +7,4 @@ for arg in "$@"; do
         *) args+=("$arg");;
     esac
 done
-exec "${ZIG:-zig}" cc -target aarch64-linux-gnu.2.33 "${args[@]}"
+exec "${ZIG:-zig}" cc -target aarch64-linux-gnu.2.38 "${args[@]}"
