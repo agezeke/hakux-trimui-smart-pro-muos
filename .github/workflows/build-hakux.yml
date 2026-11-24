@@ -1,0 +1,96 @@
+name: Build hakux.aarch64 (axis fix)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build python3 binutils-aarch64-linux-gnu llvm file
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Check the device SDL2 library (kept outside port/deps)
+        run: |
+          LIB=device-libs/libSDL2.so
+          if [ ! -f "$LIB" ]; then
+            echo "::error::$LIB is missing. Upload the libSDL2 from your TSP to device-libs/libSDL2.so (NOT to port/deps)."
+            exit 1
+          fi
+          if [ -e port/deps ]; then
+            echo "::error::port/deps already exists in the repo; unpack-sources.py refuses to run. Remove port/deps from your fork."
+            exit 1
+          fi
+          INFO="$(file -L "$LIB")"
+          echo "$INFO"
+          case "$INFO" in
+            *"ARM aarch64"*) echo "libSDL2.so is AArch64: OK" ;;
+            *) echo "::error::libSDL2.so is not an AArch64 ELF shared object. Upload the real library from the TSP (not a symlink or a text file)."; exit 1 ;;
+          esac
+
+      - name: Unpack sources
+        run: python3 port/unpack-sources.py
+
+      - name: Install the device SDL2 into port/deps/lib
+        run: |
+          mkdir -p port/deps/lib
+          cp device-libs/libSDL2.so port/deps/lib/libSDL2.so
+          ls -l port/deps/lib/
+
+      - name: Apply the Y-axis overflow fix
+        run: |
+          cat > /tmp/apply_fix.py <<'PY'
+          import subprocess, sys
+          hits = subprocess.run(
+              ["grep", "-rl", "--include=frontend.c", "SDL_CONTROLLER_AXIS_LEFTY", "."],
+              capture_output=True, text=True).stdout.split()
+          hits = [h for h in hits if "/.git/" not in h]
+          print("frontend.c candidates:", hits)
+          if len(hits) != 1:
+              sys.exit("ERROR: expected exactly one frontend.c, found %d" % len(hits))
+          p = hits[0]
+          t = open(p).read()
+          if "invert_axis" in t:
+              print("Already patched."); sys.exit(0)
+          a = "s.ly = -SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY);"
+          b = "s.ry = -SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTY);"
+          anchor = "static void pad_state(SDL_GameController *pad) {"
+          for s in (a, b, anchor):
+              if t.count(s) != 1:
+                  sys.exit("ERROR: expected text not found exactly once: " + s)
+          helper = ("/* Negate an SDL axis without overflowing: -(-32768) is +32768, which does not fit in 16 bits. */\n"
+                    "static int invert_axis(int v) { return v == -32768 ? 32767 : -v; }\n\n")
+          t = t.replace(anchor, helper + anchor)
+          t = t.replace(a, "s.ly = invert_axis(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY));")
+          t = t.replace(b, "s.ry = invert_axis(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTY));")
+          open(p, "w").write(t)
+          print("Patched", p)
+          PY
+          python3 /tmp/apply_fix.py
+          grep -rn --include=frontend.c "invert_axis" .
+
+      - name: Build
+        run: |
+          export TRIMUI_STRIP="$(command -v aarch64-linux-gnu-strip || command -v llvm-strip)"
+          export ZIG="$(command -v zig)"
+          echo "ZIG=$ZIG  TRIMUI_STRIP=$TRIMUI_STRIP"
+          bash port/build-xbox2.sh
+
+      - name: Show result
+        run: |
+          ls -l port/dist/
+          file port/dist/hakux.aarch64
+          sha256sum port/dist/hakux.aarch64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hakux-aarch64-axis-fix
+          path: port/dist/hakux.aarch64
